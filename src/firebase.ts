@@ -1,11 +1,7 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import { getDatabase, ref, set, get, onValue, off } from "firebase/database";
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+
 const firebaseConfig = {
   apiKey: "AIzaSyCC2qmWJW2Fk-IPSZ_R5BTRD7_KWPqK0Qo",
   authDomain: "katan-app.firebaseapp.com",
@@ -13,9 +9,10 @@ const firebaseConfig = {
   storageBucket: "katan-app.firebasestorage.app",
   messagingSenderId: "1063868983418",
   appId: "1:1063868983418:web:465a1cf3052d1aad85f3c3",
-  measurementId: "G-V3P6SX8D5H"
+  measurementId: "G-V3P6SX8D5H",
+  databaseURL: "https://katan-app-default-rtdb.asia-southeast1.firebasedatabase.app",
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+export const db = getDatabase(app);
+export { ref, set, get, onValue, off };

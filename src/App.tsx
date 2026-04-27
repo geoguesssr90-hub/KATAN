@@ -1,7 +1,37 @@
+// @ts-nocheck
+
 import { db, ref, set, get, onValue, off } from "./firebase";
 
 
 import { useState, useEffect, useCallback, useRef } from "react";
+
+const toArr = (x: any) => x && !Array.isArray(x) ? Object.values(x) : x ?? [];
+
+function normalizeGS(data: any) {
+  if (!data) return null;
+  const toA = (x: any) => {
+    if (!x) return [];
+    if (Array.isArray(x)) return x;
+    const arr = Object.entries(x)
+      .sort(([a],[b]) => Number(a)-Number(b))
+      .map(([,v]) => v);
+    return arr;
+  };
+  const playersArr = toA(data.players).map((p: any) => ({
+    ...p, res: p.res || {lumber:0,brick:0,wool:0,grain:0,ore:0}
+  }));
+  data.players = playersArr;
+  data.hexes = toA(data.hexes).map((h: any) => ({...h, vertexIds: toA(h.vertexIds)}));
+  data.vertices = toA(data.vertices).map((v: any) => ({...v, adjIds: toA(v.adjIds), hexIds: toA(v.hexIds)}));
+  data.edges = toA(data.edges);
+  data.log = toA(data.log);
+  data.setupOrder = toA(data.setupOrder);
+  data.dice = data.dice ? toA(data.dice) : null;
+  if (data.players.length > 0 && (data.curPlayer === undefined || !data.players[data.curPlayer])) {
+    data.curPlayer = 0;
+  }
+  return data;
+}
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const SQ3 = Math.sqrt(3);
@@ -101,13 +131,14 @@ export default function CatanOnline() {
   myIndexRef.current = myIndex;
 
 // ── Storage ──
+
 const loadGame = async (code: string) => {
   try {
     const snap = await get(ref(db, "games/" + code));
-    return snap.exists() ? snap.val() : null;
+    if (!snap.exists()) return null;
+    return normalizeGS(snap.val());
   } catch { return null; }
 };
-
 const saveGame = async (state: any) => {
   try {
     await set(ref(db, "games/" + state.code), state);
@@ -129,11 +160,12 @@ const saveMyInfo = async (info: any) => {
 
   // ── Polling ──
 const startPolling = useCallback((code: string) => {
-  if (pollRef.current) off(ref(db, "games/" + code));
+  if (pollRef.current) off(pollRef.current);
   const gameRef = ref(db, "games/" + code);
   onValue(gameRef, (snap) => {
     if (snap.exists()) {
-      const s = snap.val();
+      const s = normalizeGS(snap.val());
+      if (!s) return;
       setGs(s);
       if (s.phase === "main" || s.phase === "setup" || s.phase === "ended") setScreen("game");
       else if (s.phase === "lobby") setScreen("lobby");
@@ -207,17 +239,19 @@ const startPolling = useCallback((code: string) => {
 
   // Generic action: load fresh state, apply mutation, save
   async function doAction(fn) {
-    const s=await loadGame(gs.code); if(!s) return;
+    const s=await loadGame(gs.code);
+    console.log("doAction s:", s);
+    if(!s) { console.log("doAction: loadGame returned null"); return; }
     const ns=fn(s);
+    console.log("doAction ns:", ns);
     if(ns){ns.updatedAt=Date.now();await saveGame(ns);setGs(ns);}
   }
 
-  async function handleVertexClick(vid) {
+async function handleVertexClick(vid) {
     if(!gs||gs.curPlayer!==myIndex) return;
     await doAction(s=>{
       const {phase,setupSub,vertices,edges,players,curPlayer,setupStep,setupOrder}=s;
       const P=players[curPlayer];
-      // Setup: place settlement
       if(phase==="setup"&&setupSub==="settlement"){
         if(!canPlaceSett(vid,vertices)) return null;
         const isR2=setupStep>=players.length;
@@ -226,14 +260,14 @@ const startPolling = useCallback((code: string) => {
         let extra="";
         if(isR2){
           const rg={lumber:0,brick:0,wool:0,grain:0,ore:0};
-          vertices[vid].hexIds.forEach(hid=>{const r=TR[s.hexes[hid].terrain];if(r)rg[r]++;});
+          const vert=vertices.find(v=>v.id===vid);
+          vert?.hexIds.forEach(hid=>{const r=TR[s.hexes.find(h=>h.id===hid)?.terrain];if(r)rg[r]++;});
           np=np.map((p,i)=>i!==curPlayer?p:{...p,res:Object.fromEntries(Object.entries(p.res).map(([r,n])=>[r,n+(rg[r]||0)]))});
           const items=Object.entries(rg).filter(([,n])=>n>0).map(([r,n])=>`${RI[r]}×${n}`).join(" ");
           if(items) extra=`（${items}獲得）`;
         }
         return addLog({...s,vertices:nv,players:np,setupSub:"road",lastVid:vid},`${P.name}が定住地を配置${extra}。次に道を置いてください`);
       }
-      // Main: build settlement
       if(phase==="main"&&s.diceRolled&&s.buildMode==="settlement"){
         if(!canPlaceSett(vid,vertices)||!isConnRoad(vid,edges,curPlayer)||!canAfford(P,COSTS.settlement)) return null;
         const nv=vertices.map(v=>v.id===vid?{...v,building:{player:curPlayer,type:"settlement"}}:v);
@@ -243,9 +277,8 @@ const startPolling = useCallback((code: string) => {
         if(newVP>=10) ns={...ns,winner:curPlayer,phase:"ended"};
         return ns;
       }
-      // Main: build city
       if(phase==="main"&&s.diceRolled&&s.buildMode==="city"){
-        const v=vertices[vid];
+        const v=vertices.find(v=>v.id===vid);
         if(!v?.building||v.building.player!==curPlayer||v.building.type!=="settlement"||!canAfford(P,COSTS.city)) return null;
         const nv=vertices.map(v=>v.id===vid?{...v,building:{player:curPlayer,type:"city"}}:v);
         const np=players.map((p,i)=>i!==curPlayer?p:{...p,vp:p.vp+1,citiesLeft:p.citiesLeft-1,settlementsLeft:p.settlementsLeft+1,res:Object.fromEntries(Object.entries(p.res).map(([r,n])=>[r,n-(COSTS.city[r]||0)]))});
@@ -262,11 +295,12 @@ const startPolling = useCallback((code: string) => {
     if(!gs||gs.curPlayer!==myIndex) return;
     await doAction(s=>{
       const {phase,setupSub,vertices,edges,players,curPlayer,setupStep,setupOrder}=s;
-      const edge=edges[eid]; if(!edge||edge.road!==null) return null;
-      const P=players[curPlayer];
-      // Setup: place road
+      const edge=edges.find(e=>Number(e.id)===Number(eid));
+      console.log("found edge:", edge, "lastVid:", s.lastVid);
+      if(!edge||edge.road!=null) { console.log("blocked"); return null; }
       if(phase==="setup"&&setupSub==="road"){
-        if(edge.v1!==s.lastVid&&edge.v2!==s.lastVid) return null;
+        console.log("v1:", edge.v1, "v2:", edge.v2, "lastVid:", s.lastVid);
+        if(Number(edge.v1)!==Number(s.lastVid)&&Number(edge.v2)!==Number(s.lastVid)) { console.log("lastVid mismatch"); return null; }
         const ne=edges.map(e=>e.id===eid?{...e,road:curPlayer}:e);
         const np=players.map((p,i)=>i!==curPlayer?p:{...p,roadsLeft:p.roadsLeft-1});
         const next=setupStep+1; const done=next>=setupOrder.length;
@@ -290,7 +324,6 @@ const startPolling = useCallback((code: string) => {
       return null;
     });
   }
-
   async function handleHexClick(hid) {
     if(!gs||gs.curPlayer!==myIndex||!gs.robberMode) return;
     await doAction(s=>{
@@ -339,6 +372,15 @@ const startPolling = useCallback((code: string) => {
     if(!gs) return;
     navigator.clipboard.writeText(gs.code).catch(()=>{});
     setCopied(true); setTimeout(()=>setCopied(false),2000);
+  }
+
+
+  async function handleLeave() {
+    if(pollRef.current) off(pollRef.current);
+    localStorage.removeItem("catan:me");
+    setScreen("home");
+    setGs(null);
+    setMyIndex(null);
   }
 
   // ─── Screen: Home ─────────────────────────────────────────────────────────
@@ -455,7 +497,14 @@ const startPolling = useCallback((code: string) => {
   }
 
   // ─── Screen: Game ─────────────────────────────────────────────────────────
-  if(screen==="game"&&gs) {
+    if(screen==="game"&&gs) {
+      console.log("gs.curPlayer:", gs.curPlayer);
+      console.log("gs.players:", gs.players);
+      if(!gs.players || gs.players.length === 0 || gs.players[gs.curPlayer] === undefined) return (
+      <div style={{minHeight:"100vh",background:BG,display:"flex",alignItems:"center",justifyContent:"center",color:"#f0dda0",fontFamily:"Georgia,serif"}}>
+        読み込み中...
+      </div>
+    );
     const P=gs.players[gs.curPlayer];
     const myP=myIndex!==null?gs.players[myIndex]:null;
     const isMyTurn=gs.curPlayer===myIndex;
@@ -463,14 +512,14 @@ const startPolling = useCallback((code: string) => {
     const isSetupSett=phase==="setup"&&gs.setupSub==="settlement";
     const isSetupRoad=phase==="setup"&&gs.setupSub==="road";
 
-    const statusMsg=
-      gs.winner!==null?`🏆 ${gs.players[gs.winner].name}が勝利！`:
-      gs.robberMode?(isMyTurn?" 山賊を移動するヘックスを選択":`${P.name}が山賊を移動中...`):
-      phase==="setup"?(isMyTurn?`セットアップ: ${gs.setupSub==="settlement"?"定住地を置いてください":"道を置いてください"}`:`${P.name}がセットアップ中...`):
-      !isMyTurn?`${P.name}のターンを待っています`:
-      !gs.diceRolled?" サイコロを振ってください":
-      gs.buildMode?`配置: ${gs.buildMode==="road"?"道":gs.buildMode==="settlement"?" 定住地":"都市"}を選択`:
-      "アクションを選択";
+  const statusMsg=
+    gs.winner!=null&&gs.players[gs.winner]?`🏆 ${gs.players[gs.winner].name}が勝利！`:
+    gs.robberMode?(isMyTurn?" 山賊を移動するヘックスを選択":`${P.name}が山賊を移動中...`):
+    phase==="setup"?(isMyTurn?`セットアップ: ${gs.setupSub==="settlement"?"定住地を置いてください":"道を置いてください"}`:`${P.name}がセットアップ中...`):
+    !isMyTurn?`${P.name}のターンを待っています`:
+    !gs.diceRolled?" サイコロを振ってください":
+    gs.buildMode?`配置: ${gs.buildMode==="road"?"道":gs.buildMode==="settlement"?" 定住地":"都市"}を選択`:
+    "アクションを選択";
 
     const diceStr=gs.dice?`${gs.dice[0]}＋${gs.dice[1]}＝${gs.dice[0]+gs.dice[1]}`:"－";
 
@@ -485,11 +534,14 @@ const startPolling = useCallback((code: string) => {
             <div style={{padding:"3px 10px",background:isMyTurn?"#142a10":"#080e06",border:`1px solid ${isMyTurn?"#2a6020":"#162010"}`,borderRadius:"20px",fontSize:"11px",color:isMyTurn?"#4ab83a":"#5a7040"}}>
               {isMyTurn?"✦ あなたのターン":`${P.name}のターン`}
             </div>
+            <button onClick={handleLeave} style={{background:"none",border:"none",      color:"#384828",  fontSize:"11px",cursor:"pointer",textDecoration:"underline"}}>
+            ← 退室する
+            </button>
           </div>
         </div>
 
         {/* Winner overlay */}
-        {gs.winner!==null&&(
+        {gs.winner!==null&&gs.players[gs.winner]&&(
           <div style={{position:"fixed",inset:0,background:"#000d",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
             <div style={{background:"linear-gradient(135deg,#140f04,#1e1808)",border:"2px solid #c09030",borderRadius:"16px",padding:"32px 40px",textAlign:"center",boxShadow:"0 0 60px #c0903033"}}>
               <div style={{fontSize:"60px",marginBottom:"10px"}}>🏆</div>
@@ -534,7 +586,7 @@ const startPolling = useCallback((code: string) => {
               {gs.edges.map(edge=>{
                 const v1=gs.vertices[edge.v1],v2=gs.vertices[edge.v2];
                 if(!v1||!v2) return null;
-                const canP=isMyTurn&&(isSetupRoad||gs.buildMode==="road");
+                const canP=isMyTurn&&(isSetupRoad||(gs.phase==="main"&&gs.buildMode==="road"));
                 const isHov=hovE===edge.id&&canP&&edge.road===null;
                 return(
                   <g key={edge.id} onClick={()=>handleEdgeClick(edge.id)} onMouseEnter={()=>setHovE(edge.id)} onMouseLeave={()=>setHovE(null)} style={{cursor:canP?"pointer":"default"}}>
