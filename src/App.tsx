@@ -1,3 +1,6 @@
+import { db, ref, set, get, onValue, off } from "./firebase";
+
+
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -97,32 +100,47 @@ export default function CatanOnline() {
   const myIndexRef = useRef(null);
   myIndexRef.current = myIndex;
 
-  // ── Storage ──
-  const loadGame = async (code) => {
-    try { const r=await window.storage.get(SK+code,true); return r?JSON.parse(r.value):null; } catch { return null; }
-  };
-  const saveGame = async (state) => {
-    try { await window.storage.set(SK+state.code,JSON.stringify(state),true); } catch(e){console.error(e);}
-  };
-  const loadMyInfo = async () => {
-    try { const r=await window.storage.get("catan:me",false); return r?JSON.parse(r.value):null; } catch { return null; }
-  };
-  const saveMyInfo = async (info) => {
-    try { await window.storage.set("catan:me",JSON.stringify(info),false); } catch {}
-  };
+// ── Storage ──
+const loadGame = async (code: string) => {
+  try {
+    const snap = await get(ref(db, "games/" + code));
+    return snap.exists() ? snap.val() : null;
+  } catch { return null; }
+};
+
+const saveGame = async (state: any) => {
+  try {
+    await set(ref(db, "games/" + state.code), state);
+  } catch(e) { console.error(e); }
+};
+
+const loadMyInfo = async () => {
+  try {
+    const r = localStorage.getItem("catan:me");
+    return r ? JSON.parse(r) : null;
+  } catch { return null; }
+};
+
+const saveMyInfo = async (info: any) => {
+  try {
+    localStorage.setItem("catan:me", JSON.stringify(info));
+  } catch {}
+};
 
   // ── Polling ──
-  const startPolling = useCallback((code) => {
-    if(pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async ()=>{
-      const s=await loadGame(code);
-      if(s){
-        setGs(s);
-        if(s.phase==="main"||s.phase==="setup"||s.phase==="ended") setScreen("game");
-        else if(s.phase==="lobby") setScreen("lobby");
-      }
-    }, 2000);
-  },[]);
+const startPolling = useCallback((code: string) => {
+  if (pollRef.current) off(ref(db, "games/" + code));
+  const gameRef = ref(db, "games/" + code);
+  onValue(gameRef, (snap) => {
+    if (snap.exists()) {
+      const s = snap.val();
+      setGs(s);
+      if (s.phase === "main" || s.phase === "setup" || s.phase === "ended") setScreen("game");
+      else if (s.phase === "lobby") setScreen("lobby");
+    }
+  });
+  pollRef.current = gameRef as any;
+}, []);
 
   useEffect(()=>{
     (async()=>{
@@ -136,7 +154,9 @@ export default function CatanOnline() {
         }
       }
     })();
-    return ()=>{ if(pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+    if (pollRef.current) off(pollRef.current);
+    };
   },[]);
 
   // ── Actions ──
