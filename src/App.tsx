@@ -34,6 +34,14 @@ function normalizeGS(data: any) {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
+const COLORS = {
+  bg: "#0b0f0a",
+  panel: "#121a12",
+  border: "#2a3a1a",
+  accent: "#c09030",
+  text: "#f0dda0",
+  sub: "#5a7040"
+};
 const SQ3 = Math.sqrt(3);
 const HS = 44;
 const BCX = 290, BCY = 290;
@@ -85,8 +93,8 @@ function createBoard() {
 
 // ─── Game helpers ────────────────────────────────────────────────────────────
 const canAfford = (p,cost) => Object.entries(cost).every(([r,n])=>p.res[r]>=n);
-const canPlaceSett = (vid,verts) => { const v=verts[vid]; if(!v||v.building) return false; return v.adjIds.every(aid=>!verts[aid]?.building); };
-const isConnRoad = (vid,edges,pid) => edges.some(e=>(e.v1===vid||e.v2===vid)&&e.road===pid);
+const canPlaceSett = (vid,verts) => { const v=verts.find(v=>v.id===vid); if(!v||v.building) return false; return v.adjIds.every(aid=>!verts.find(a=>a.id===aid)?.building); };
+const isConnRoad = (vid,edges,pid) => edges.some(e=>(Number(e.v1)===Number(vid)||Number(e.v2)===Number(vid))&&e.road===pid);
 const genCode = () => { const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; return Array.from({length:4},()=>c[(Math.random()*c.length)|0]).join(""); };
 const addLog = (s,msg) => ({...s, log:[msg,...(s.log||[]).slice(0,29)]});
 const initPlayer = (id,name) => ({id,name,color:PC[id],res:{lumber:0,brick:0,wool:0,grain:0,ore:0},vp:0,settlementsLeft:5,citiesLeft:4,roadsLeft:15});
@@ -104,13 +112,27 @@ function createInitialState(code, hostName) {
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
-const BG = "linear-gradient(135deg,#080d05 0%,#0a1208 100%)";
-const panelStyle = { background:"#0f1a0b", border:"1px solid #283820", borderRadius:"10px", padding:"10px 12px" };
-const btnStyle = (disabled,active) => ({
-  padding:"7px 10px", background:active?"#243d18":disabled?"#060d04":"#0f1a0b",
-  color:disabled?"#303d28":"#d0c080", border:`1px solid ${active?"#4a7a2a":disabled?"#182210":"#283820"}`,
-  borderRadius:"6px", cursor:disabled?"not-allowed":"pointer", fontSize:"12px",
-  textAlign:"left", transition:"all 0.15s", width:"100%",
+const BG = "radial-gradient(circle at 30% 20%, #122010, #080d05 70%)";
+const panelStyle = {
+  background: "linear-gradient(90deg,#1a2a10,#0a1208)",
+  border: "1px solid #2a3a1a",
+  borderRadius: "12px",
+  padding: "10px 12px",
+  boxShadow: "0 6px 16px #00000066"
+};
+const btnStyle = (disabled, active) => ({
+  padding: "7px 10px",
+  background: active
+    ? "linear-gradient(#2a3d18,#121a0b)"
+    : "linear-gradient(#121a12,#0a1208)",
+  color: disabled ? "#303d28" : "#e0d090",
+  border: `1px solid ${active ? "#4a7a2a" : "#283820"}`,
+  borderRadius: "6px",
+  cursor: disabled ? "not-allowed" : "pointer",
+  fontSize: "12px",
+  transition: "all 0.12s",
+  boxShadow: "inset 0 1px 0 #ffffff11, 0 2px 6px #00000066",
+  transform: active ? "translateY(-1px)" : "none"
 });
 const inputStyle = { display:"block",width:"100%",padding:"9px 12px",background:"#060d04",border:"1px solid #283820",borderRadius:"8px",color:"#f0dda0",fontSize:"14px",boxSizing:"border-box",outline:"none",marginBottom:"12px" };
 
@@ -296,6 +318,8 @@ async function handleVertexClick(vid) {
     await doAction(s=>{
       const {phase,setupSub,vertices,edges,players,curPlayer,setupStep,setupOrder}=s;
       const edge=edges.find(e=>Number(e.id)===Number(eid));
+      const P=players[curPlayer];
+      if(!P)return null;
       console.log("found edge:", edge, "lastVid:", s.lastVid);
       if(!edge||edge.road!=null) { console.log("blocked"); return null; }
       if(phase==="setup"&&setupSub==="road"){
@@ -315,7 +339,8 @@ async function handleVertexClick(vid) {
       }
       // Main: build road
       if(phase==="main"&&s.buildMode==="road"&&s.diceRolled&&canAfford(P,COSTS.road)){
-        const connected=vertices[edge.v1]?.building?.player===curPlayer||vertices[edge.v2]?.building?.player===curPlayer||isConnRoad(edge.v1,edges,curPlayer)||isConnRoad(edge.v2,edges,curPlayer);
+        const v1b=vertices.find(v=>v.id===edge.v1); const v2b=vertices.find(v=>v.id===edge.v2);
+        const connected=v1b?.building?.player===curPlayer||v2b?.building?.player===curPlayer||isConnRoad(edge.v1,edges,curPlayer)||isConnRoad(edge.v2,edges,curPlayer);
         if(!connected) return null;
         const ne=edges.map(e=>e.id===eid?{...e,road:curPlayer}:e);
         const np=players.map((p,i)=>i!==curPlayer?p:{...p,roadsLeft:p.roadsLeft-1,res:Object.fromEntries(Object.entries(p.res).map(([r,n])=>[r,n-(COSTS.road[r]||0)]))});
@@ -345,7 +370,7 @@ async function handleVertexClick(vid) {
       hexes.forEach(hex=>{
         if(hex.number===total&&!hex.hasRobber){
           const res=TR[hex.terrain]; if(!res) return;
-          hex.vertexIds.forEach(vid=>{ const b=vertices[vid]?.building; if(b) gains[b.player][res]+=b.type==="city"?2:1; });
+          hex.vertexIds.forEach(vid=>{ const b=vertices.find(v=>v.id===vid)?.building; if(b) gains[b.player][res]+=b.type==="city"?2:1; });
         }
       });
       const newPlayers=players.map((p,i)=>({...p,res:Object.fromEntries(Object.entries(p.res).map(([r,n])=>[r,n+gains[i][r]]))}));
@@ -385,6 +410,7 @@ async function handleVertexClick(vid) {
 
   // ─── Screen: Home ─────────────────────────────────────────────────────────
   if(screen==="home") return (
+    
     <div style={{minHeight:"100vh",background:BG,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:'"Noto Serif JP",Georgia,serif',color:"#f0dda0"}}>
       <div style={{background:"#0f1a0b",border:"1px solid #2a3a1a",borderRadius:"16px",padding:"36px 30px",width:"340px",maxWidth:"93vw"}}>
         <h1 style={{margin:"0 0 2px",textAlign:"center",color:"#c09030",letterSpacing:"5px",fontSize:"26px"}}>⚓ カタン</h1>
@@ -560,7 +586,13 @@ async function handleVertexClick(vid) {
           {/* Board SVG */}
           <div style={{flexShrink:0}}>
             <svg width={580} height={580} style={{borderRadius:"50%",display:"block",filter:"drop-shadow(0 0 24px #00000099)"}}>
-              <circle cx={290} cy={290} r={288} fill="#163a5a"/>
+              <defs>
+  <radialGradient id="seaGrad">
+    <stop offset="0%" stopColor="#2a6b9a"/>
+    <stop offset="100%" stopColor="#0f2a44"/>
+  </radialGradient>
+</defs>
+              <circle cx={290} cy={290} r={288} fill="url(#seaGrad)"/>
               <circle cx={290} cy={290} r={274} fill="#1c4870" stroke="#245880" strokeWidth="1"/>
               {/* hexes */}
               {gs.hexes.map(hex=>{
@@ -569,14 +601,40 @@ async function handleVertexClick(vid) {
                 const robTarget=gs.robberMode&&isMyTurn&&!hex.hasRobber;
                 return(
                   <g key={hex.id} onClick={()=>handleHexClick(hex.id)} style={{cursor:robTarget?"pointer":"default"}}>
-                    <polygon points={pts} fill={TC[hex.terrain]} stroke="#080e05" strokeWidth="1.5" opacity={gs.robberMode&&!robTarget?0.55:1}/>
+                    <polygon
+                      points={pts}
+                      fill={TC[hex.terrain]}
+                      stroke="#080e05"
+                      strokeWidth="1.5"
+                      style={{ filter: "drop-shadow(0 2px 3px #0008)" }}
+                      opacity={gs.robberMode&&!robTarget?0.55:1}
+                    />
                     {robTarget&&<polygon points={pts} fill="white" opacity={0.1}/>}
                     <text x={hex.cx} y={hex.cy-13} textAnchor="middle" fontSize="17">{TI[hex.terrain]}</text>
                     {hex.hasRobber&&<text x={hex.cx} y={hex.cy+10} textAnchor="middle" fontSize="20">🏴</text>}
                     {hex.number&&!hex.hasRobber&&(
                       <>
-                        <circle cx={hex.cx} cy={hex.cy+8} r={14} fill={hex.number===6||hex.number===8?"#7a1010":"#f0e4c0"} stroke="#080e05" strokeWidth="1.5"/>
-                        <text x={hex.cx} y={hex.cy+13} textAnchor="middle" fontSize="12" fontWeight="bold" fill={hex.number===6||hex.number===8?"#ffdc90":"#100a04"}>{hex.number}</text>
+                      <circle
+                        cx={hex.cx}
+                        cy={hex.cy + 8}
+                        r={15}
+                        fill="#f7edd4"
+                        stroke="#8b6b2e"
+                        strokeWidth="3"
+                      />
+                      <text
+                        x={hex.cx}
+                        y={hex.cy + 14}
+                        textAnchor="middle"
+                        fontSize="15"
+                        fontWeight="900"
+                        fill={hex.number === 6 || hex.number === 8 ? "#c0392b" : "#1a1a1a"}
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                        paintOrder="stroke"
+                      >
+                        {hex.number}
+                      </text>
                       </>
                     )}
                   </g>
@@ -584,10 +642,10 @@ async function handleVertexClick(vid) {
               })}
               {/* edges */}
               {gs.edges.map(edge=>{
-                const v1=gs.vertices[edge.v1],v2=gs.vertices[edge.v2];
+                const v1=gs.vertices.find(v=>v.id===edge.v1), v2=gs.vertices.find(v=>v.id===edge.v2);
                 if(!v1||!v2) return null;
                 const canP=isMyTurn&&(isSetupRoad||(gs.phase==="main"&&gs.buildMode==="road"));
-                const isHov=hovE===edge.id&&canP&&edge.road===null;
+                const isHov=hovE===edge.id&&canP&&edge.road==null;
                 return(
                   <g key={edge.id} onClick={()=>handleEdgeClick(edge.id)} onMouseEnter={()=>setHovE(edge.id)} onMouseLeave={()=>setHovE(null)} style={{cursor:canP?"pointer":"default"}}>
                     <line x1={v1.x} y1={v1.y} x2={v2.x} y2={v2.y} stroke={edge.road!==null?PC[edge.road]:isHov?"#ffffffaa":"transparent"} strokeWidth={edge.road!==null?5:3} strokeLinecap="round"/>
@@ -634,7 +692,8 @@ async function handleVertexClick(vid) {
 
             {/* Player cards */}
             {gs.players.map(p=>(
-              <div key={p.id} style={{...panelStyle,border:`1px solid ${p.id===gs.curPlayer?PC[p.id]+"77":p.id===myIndex?"#1e3a14":"#162010"}`,background:p.id===gs.curPlayer?"#0f1c09":"#0a1208"}}>
+              <div key={p.id} style={{...panelStyle,border: `1px solid ${p.id===gs.curPlayer ? PC[p.id]+"88" : "#162010"}`,
+                boxShadow: p.id===gs.curPlayer ? `0 0 8px ${PC[p.id]}55` : "none",background:p.id===gs.curPlayer?"#0f1c09":"#0a1208"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
                     <div style={{width:"10px",height:"10px",borderRadius:"50%",background:PC[p.id],boxShadow:`0 0 5px ${PC[p.id]}88`}}/>
@@ -702,7 +761,7 @@ async function handleVertexClick(vid) {
   }
 
   return (
-    <div style={{minHeight:"100vh",background:BG,display:"flex",alignItems:"center",justifyContent:"center",color:"#f0dda0",fontFamily:"Georgia,serif"}}>
+    <div style={{minHeight:"100vh",background:BG,display:"flex",alignItems:"center",justifyContent:"center",color:"#f0dda0",fontFamily:'"Cinzel","Noto Serif JP",serif'}}>
       読み込み中...
     </div>
   );
