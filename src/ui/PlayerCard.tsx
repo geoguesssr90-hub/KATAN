@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { PC, RI } from "../game/constants";
-import { calcTotalVP } from "../game/logic";
+import { calcTotalVP, calcLongestRoad } from "../game/logic";
 import { panelStyle, C, FONT_HEAD } from "./styles";
 
 export default function PlayerCard({ p, gs, myIndex }) {
@@ -8,6 +8,8 @@ export default function PlayerCard({ p, gs, myIndex }) {
   const hasLA = gs.largestArmy === p.id;
   const hasLR = gs.longestRoad === p.id;
   const vpCards = [...(p.devCards || []), ...(p.newDevCards || [])].filter(c => c === 'vp').length;
+  const unusedDevCards = (p.devCards?.length || 0) + (p.newDevCards?.length || 0);
+  const roadLen = calcLongestRoad(p.id, gs.edges, gs.vertices);
   const isCur = p.id === gs.curPlayer;
   return (
     <div style={{
@@ -40,20 +42,26 @@ export default function PlayerCard({ p, gs, myIndex }) {
           </span>
         ))}
       </div>
+      {/* 道の長さ・騎士・未使用の発展カードは常時表示（一目で比較できるように） */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
-        {(p.devCards?.length || 0) + (p.newDevCards?.length || 0) > 0 && (
-          <span style={{ background: "#e2d5c2", border: `1px solid ${C.line}`, borderRadius: "4px", padding: "1px 6px", fontSize: "10px", color: C.navy, fontWeight: 700 }}>
-            発展カード {(p.devCards?.length || 0) + (p.newDevCards?.length || 0)}枚
-          </span>
-        )}
+        <span title="道の長さ（最長交易路には5本以上必要）" style={{
+          background: hasLR ? "#f0e0b0" : "#e6d6ae", border: `1px solid ${hasLR ? "#b89a4a" : C.lineSoft}`,
+          borderRadius: "4px", padding: "1px 6px", fontSize: "10px", color: hasLR ? "#7a5a10" : C.inkSub, fontWeight: 700,
+        }}>
+          🛤️ 道 {roadLen}
+        </span>
+        <span title="使用した騎士カードの枚数（最大騎士軍には3枚以上必要）" style={{
+          background: hasLA ? "#e8d0d0" : "#e6d6ae", border: `1px solid ${hasLA ? "#a06a6a" : C.lineSoft}`,
+          borderRadius: "4px", padding: "1px 6px", fontSize: "10px", color: hasLA ? "#7a2a2a" : C.inkSub, fontWeight: 700,
+        }}>
+          ⚔️ 騎士 {p.knightsPlayed || 0}
+        </span>
+        <span title="未使用の発展カードの枚数" style={{ background: "#e2d5c2", border: `1px solid ${C.line}`, borderRadius: "4px", padding: "1px 6px", fontSize: "10px", color: C.navy, fontWeight: 700 }}>
+          🎴 発展カード {unusedDevCards}
+        </span>
         {vpCards > 0 && (
           <span style={{ background: "#f0e0b0", border: "1px solid #b89a4a", borderRadius: "4px", padding: "1px 6px", fontSize: "10px", color: "#7a5a10", fontWeight: 700 }}>
             勝利点×{vpCards}
-          </span>
-        )}
-        {(p.knightsPlayed || 0) > 0 && (
-          <span style={{ background: "#e8d0d0", border: "1px solid #a06a6a", borderRadius: "4px", padding: "1px 6px", fontSize: "10px", color: "#7a2a2a", fontWeight: 700 }}>
-            騎士×{p.knightsPlayed}
           </span>
         )}
       </div>

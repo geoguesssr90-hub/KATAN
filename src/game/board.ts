@@ -70,12 +70,12 @@ export function createBoard() {
       }
     }
   }
-  const portTypes = shuf([null, null, null, null, "lumber", "brick", "wool", "grain", "ore"]);
+  // "generic"を使う（nullはFirebase保存時にキーごと消えてしまうため使わない）
+  const portTypes = shuf(["generic", "generic", "generic", "generic", "lumber", "brick", "wool", "grain", "ore"]);
   const ports = shuf(pairs).slice(0, 9).map((vids, i) => ({ v1: vids[0], v2: vids[1], resource: portTypes[i] }));
   ports.forEach(port => {
-    const pv = port.resource === null ? "generic" : port.resource;
-    const v1 = vertices.find(v => v.id === port.v1); if (v1) v1.port = pv;
-    const v2 = vertices.find(v => v.id === port.v2); if (v2) v2.port = pv;
+    const v1 = vertices.find(v => v.id === port.v1); if (v1) v1.port = port.resource;
+    const v2 = vertices.find(v => v.id === port.v2); if (v2) v2.port = port.resource;
   });
   return { hexes, vertices, edges, ports };
 }

@@ -3,8 +3,8 @@
 // （波の海・羅針盤・テクスチャ付きタイル・手描き風アイコン・家/城の駒）
 import { useState } from "react";
 import { hexCorners } from "../game/board";
-import { TERRAIN_GRAD, PC, PC_DARK, NUM_PIPS } from "../game/constants";
-import { canPlaceSett, isConnRoad } from "../game/logic";
+import { TERRAIN_GRAD, PC, PC_DARK, NUM_PIPS, COSTS } from "../game/constants";
+import { canPlaceSett, isConnRoad, canAfford } from "../game/logic";
 
 // 資源 → 地形アイコンの対応（港の表示に使う）
 const RES_ICON = { lumber: "forest", brick: "hills", wool: "pasture", grain: "fields", ore: "mountains" };
@@ -93,6 +93,22 @@ function PatternDefs() {
   );
 }
 
+// ヘックスの縁を6つの台形に割って、光源(左上)に応じて明暗を付ける立体ベベル
+function hexBevelFacets(hex) {
+  const cs = hexCorners(hex.cx, hex.cy);
+  const inset = cs.map(c => ({ x: hex.cx + (c.x - hex.cx) * 0.85, y: hex.cy + (c.y - hex.cy) * 0.85 }));
+  const lx = -0.55, ly = -0.83; // 左上からの光
+  return cs.map((c, i) => {
+    const c2 = cs[(i + 1) % 6];
+    const i1 = inset[i], i2 = inset[(i + 1) % 6];
+    const mx = (c.x + c2.x) / 2 - hex.cx, my = (c.y + c2.y) / 2 - hex.cy;
+    const len = Math.hypot(mx, my) || 1;
+    const light = (mx / len) * lx + (my / len) * ly;
+    const fill = light > 0.25 ? `rgba(255,255,255,${0.1 + light * 0.22})` : light < -0.25 ? `rgba(0,0,0,${0.08 + -light * 0.26})` : "rgba(0,0,0,0.03)";
+    return { key: i, pts: `${c.x},${c.y} ${c2.x},${c2.y} ${i2.x},${i2.y} ${i1.x},${i1.y}`, fill };
+  });
+}
+
 // 羅針盤（装飾）
 function CompassRose({ x, y, size = 26 }) {
   const s = size, s2 = size * 0.6;
@@ -149,14 +165,16 @@ function NumberToken({ hex, dimmed }) {
   const hot = n === 6 || n === 8;
   const color = hot ? "#9e3323" : "#2f2618";
   const pips = NUM_PIPS[n] || 0;
+  const cy = hex.cy + 10;
   return (
-    <g opacity={dimmed ? 0.4 : 1} style={{ pointerEvents: "none" }}>
-      <circle cx={hex.cx} cy={hex.cy + 10} r={14.5} fill="#f3e8cd" stroke="#7a5a2e" strokeWidth="2" />
-      <circle cx={hex.cx} cy={hex.cy + 10} r={12} fill="none" stroke="#c9b280" strokeWidth="0.8" />
-      <text x={hex.cx} y={hex.cy + 14.5} textAnchor="middle" fontSize={hot ? 15 : 13.5} fontWeight="800"
+    <g opacity={dimmed ? 0.4 : 1} style={{ pointerEvents: "none", filter: "drop-shadow(0 2.5px 2px #00000070)" }}>
+      <circle cx={hex.cx} cy={cy} r={15} fill="url(#tokenGrad)" stroke="#5c4319" strokeWidth="1.6" />
+      <circle cx={hex.cx} cy={cy} r={12.3} fill="none" stroke={hot ? "#c76a52" : "#c9b280"} strokeWidth="0.9" opacity="0.8" />
+      <path d={`M ${hex.cx - 10} ${cy - 8} A 12 12 0 0 1 ${hex.cx + 7} ${cy - 10.5}`} fill="none" stroke="#fffdf2" strokeWidth="1.6" opacity="0.55" strokeLinecap="round" />
+      <text x={hex.cx} y={cy + 4.5} textAnchor="middle" fontSize={hot ? 15 : 13.5} fontWeight="800"
         fill={color} fontFamily='"Shippori Mincho B1",serif'>{n}</text>
       {Array.from({ length: pips }, (_, i) => (
-        <circle key={i} cx={hex.cx - (pips - 1) * 2.4 + i * 4.8} cy={hex.cy + 19.5} r={1.3} fill={color} />
+        <circle key={i} cx={hex.cx - (pips - 1) * 2.4 + i * 4.8} cy={cy + 9.5} r={1.3} fill={color} />
       ))}
     </g>
   );
@@ -167,19 +185,44 @@ export default function BoardView({ gs, myIndex, onVertex, onEdge, onHex }) {
   const [hovE, setHovE] = useState(null);
   const isMyTurn = gs.curPlayer === myIndex;
   const phase = gs.phase;
+  const myP = gs.players?.[myIndex];
   const isSetupSett = phase === "setup" && gs.setupSub === "settlement";
   const isSetupRoad = phase === "setup" && gs.setupSub === "road";
   const isRB = gs.pendingAction?.type === 'roadBuilding';
-  const canRoadPlace = isMyTurn && (isSetupRoad || (phase === "main" && (gs.buildMode === "road" || isRB)));
+  // ボタンでモードを選ばず、サイコロを振った後はいつでも置ける場所をダブルクリックで建設できる
+  const blockedByOtherAction = !!gs.pendingAction || gs.robberMode || !!gs.pendingRobberSteal || (gs.discardQueue?.length || 0) > 0;
+  const canActNow = isMyTurn && phase === "main" && gs.diceRolled && !blockedByOtherAction;
+  const canBuildRoadNow = canActNow && canAfford(myP, COSTS.road);
+  const canBuildSettNow = canActNow && canAfford(myP, COSTS.settlement);
+  const canBuildCityNow = canActNow && canAfford(myP, COSTS.city);
+  const canRoadPlace = isMyTurn && (isSetupRoad || isRB || canBuildRoadNow);
 
   return (
     <svg width={580} height={580} viewBox="0 0 580 580"
       style={{ maxWidth: "min(96vw, 580px)", height: "auto", display: "block", filter: "drop-shadow(0 12px 30px #000000aa)" }}>
       <defs>
-        <radialGradient id="seaG" cx="50%" cy="42%">
-          <stop offset="0%" stopColor="#23606e" />
-          <stop offset="65%" stopColor="#153f4e" />
-          <stop offset="100%" stopColor="#0c2a37" />
+        <radialGradient id="seaG" cx="42%" cy="35%">
+          <stop offset="0%" stopColor="#2d7686" />
+          <stop offset="45%" stopColor="#1c5568" />
+          <stop offset="78%" stopColor="#123f50" />
+          <stop offset="100%" stopColor="#081e2a" />
+        </radialGradient>
+        <radialGradient id="seaGlint" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#e8f8ff" stopOpacity="0.5" />
+          <stop offset="100%" stopColor="#e8f8ff" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="frameWood" cx="35%" cy="18%" r="95%">
+          <stop offset="0%" stopColor="#9a7143" />
+          <stop offset="45%" stopColor="#6b4726" />
+          <stop offset="100%" stopColor="#2a1911" />
+        </radialGradient>
+        <pattern id="pt-woodgrain" width="14" height="290" patternUnits="userSpaceOnUse">
+          <path d="M0 0 Q7 145 2 290 M8 0 Q13 145 10 290" stroke="#1c1008" strokeWidth="0.8" opacity="0.35" fill="none" />
+        </pattern>
+        <radialGradient id="tokenGrad" cx="35%" cy="25%" r="85%">
+          <stop offset="0%" stopColor="#fffaee" />
+          <stop offset="50%" stopColor="#f3e8cd" />
+          <stop offset="100%" stopColor="#d6bf8c" />
         </radialGradient>
         {Object.entries(TERRAIN_GRAD).map(([t, [a, b]]) => (
           <linearGradient key={t} id={`tg-${t}`} x1="0" y1="0" x2="0" y2="1">
@@ -191,11 +234,27 @@ export default function BoardView({ gs, myIndex, onVertex, onEdge, onHex }) {
         <IconDefs />
       </defs>
 
-      {/* 海と枠（ロープ風の二重リング） */}
-      <circle cx={290} cy={290} r={288} fill="#3b2a1a" />
-      <circle cx={290} cy={290} r={283} fill="url(#seaG)" stroke="#8a6a3a" strokeWidth="2.5" />
-      <circle cx={290} cy={290} r={283} fill="url(#pt-waves)" />
-      <circle cx={290} cy={290} r={276} fill="none" stroke="#c9a84f" strokeWidth="1" strokeDasharray="1 6" opacity="0.5" strokeLinecap="round" />
+      {/* 木製の外枠（艶出しリム + 木目 + 鋲） */}
+      <circle cx={290} cy={290} r={289} fill="url(#frameWood)" stroke="#140b06" strokeWidth="1.5" />
+      <circle cx={290} cy={290} r={289} fill="url(#pt-woodgrain)" opacity="0.6" />
+      <circle cx={290} cy={290} r={289} fill="none" stroke="#ffdca0" strokeWidth="0.8" opacity="0.25" />
+      {Array.from({ length: 16 }, (_, i) => {
+        const a = (Math.PI * 2 * i) / 16;
+        const rx = 290 + Math.cos(a) * 286.5, ry = 290 + Math.sin(a) * 286.5;
+        return (
+          <g key={i}>
+            <circle cx={rx} cy={ry} r={2.1} fill="#3a2a16" opacity="0.9" />
+            <circle cx={rx - 0.5} cy={ry - 0.5} r="0.9" fill="#d8b56c" opacity="0.7" />
+          </g>
+        );
+      })}
+      <circle cx={290} cy={290} r={283.5} fill="none" stroke="#000" strokeWidth="4" opacity="0.35" />
+
+      {/* 海 */}
+      <circle cx={290} cy={290} r={281} fill="url(#seaG)" stroke="#8a6a3a" strokeWidth="2" />
+      <circle cx={290} cy={290} r={281} fill="url(#pt-waves)" />
+      <ellipse cx={195} cy={165} rx={110} ry={70} fill="url(#seaGlint)" style={{ pointerEvents: "none" }} />
+      <circle cx={290} cy={290} r={274} fill="none" stroke="#c9a84f" strokeWidth="1" strokeDasharray="1 6" opacity="0.5" strokeLinecap="round" />
       <CompassRose x={462} y={122} />
 
       {/* ヘックス */}
@@ -208,6 +267,9 @@ export default function BoardView({ gs, myIndex, onVertex, onEdge, onHex }) {
           <g key={hex.id} onClick={() => onHex(hex.id)} style={{ cursor: robTarget ? "pointer" : "default" }}>
             <polygon points={pts} fill={`url(#tg-${hex.terrain})`} stroke="#132630" strokeWidth="2.5" strokeLinejoin="round" />
             <polygon points={pts} fill={`url(#pt-${hex.terrain})`} style={{ pointerEvents: "none" }} />
+            {hexBevelFacets(hex).map(f => (
+              <polygon key={f.key} points={f.pts} fill={f.fill} style={{ pointerEvents: "none" }} />
+            ))}
             <polygon points={inner} fill="none" stroke="#ffffff2a" strokeWidth="1.2" style={{ pointerEvents: "none" }} />
             {gs.robberMode && !robTarget && !hex.hasRobber && <polygon points={pts} fill="#000" opacity="0.25" style={{ pointerEvents: "none" }} />}
             {robTarget && <polygon points={pts} fill="#fff" opacity="0.13" className="pulse-spot" style={{ pointerEvents: "none" }} />}
@@ -227,8 +289,8 @@ export default function BoardView({ gs, myIndex, onVertex, onEdge, onHex }) {
         const dx = mx - 290, dy = my - 290;
         const len = Math.sqrt(dx * dx + dy * dy) || 1;
         const ox = mx + (dx / len) * 14, oy = my + (dy / len) * 14;
-        const icon = port.resource === null ? "anchor" : RES_ICON[port.resource];
-        const rate = port.resource === null ? "3:1" : "2:1";
+        const icon = (!port.resource || port.resource === "generic") ? "anchor" : RES_ICON[port.resource];
+        const rate = (!port.resource || port.resource === "generic") ? "3:1" : "2:1";
         return (
           <g key={i} style={{ pointerEvents: "none" }}>
             <line x1={v1.x} y1={v1.y} x2={ox} y2={oy} stroke="#8a6a3a" strokeWidth="2.5" strokeDasharray="3 3" />
@@ -240,33 +302,41 @@ export default function BoardView({ gs, myIndex, onVertex, onEdge, onHex }) {
         );
       })}
 
-      {/* 道 */}
+      {/* 道（置ける辺はダブルクリックで建設） */}
       {gs.edges.map(edge => {
         const v1 = gs.vertices.find(v => v.id === edge.v1), v2 = gs.vertices.find(v => v.id === edge.v2);
         if (!v1 || !v2) return null;
-        const isHov = hovE === edge.id && canRoadPlace && edge.road == null;
+        const connected = isSetupRoad
+          ? (Number(edge.v1) === Number(gs.lastVid) || Number(edge.v2) === Number(gs.lastVid))
+          : (v1.building?.player === myIndex || v2.building?.player === myIndex || isConnRoad(edge.v1, gs.edges, myIndex) || isConnRoad(edge.v2, gs.edges, myIndex));
+        const canPlaceHere = canRoadPlace && edge.road == null && connected;
+        const isHov = hovE === edge.id && canPlaceHere;
         return (
-          <g key={edge.id} onClick={() => onEdge(edge.id)}
+          <g key={edge.id} onDoubleClick={() => onEdge(edge.id)}
             onMouseEnter={() => setHovE(edge.id)} onMouseLeave={() => setHovE(null)}
-            style={{ cursor: canRoadPlace && edge.road == null ? "pointer" : "default" }}>
+            style={{ cursor: canPlaceHere ? "pointer" : "default" }}>
             {edge.road != null && <line x1={v1.x} y1={v1.y} x2={v2.x} y2={v2.y} stroke="#1b0f08" strokeWidth="8" strokeLinecap="round" />}
             <line x1={v1.x} y1={v1.y} x2={v2.x} y2={v2.y}
               stroke={edge.road != null ? PC[edge.road] : isHov ? "#ffe9a8" : "transparent"}
               strokeWidth={edge.road != null ? 4.5 : 4} strokeLinecap="round"
               strokeDasharray={isHov ? "6 5" : undefined} opacity={isHov ? 0.9 : 1} />
+            {canPlaceHere && !isHov && (
+              <line x1={v1.x} y1={v1.y} x2={v2.x} y2={v2.y} stroke="#ffe9a8" strokeWidth="3" strokeLinecap="round"
+                strokeDasharray="3 6" opacity="0.55" className="pulse-spot" style={{ pointerEvents: "none" }} />
+            )}
             <line x1={v1.x} y1={v1.y} x2={v2.x} y2={v2.y} stroke="transparent" strokeWidth="14" />
           </g>
         );
       })}
 
-      {/* 頂点（定住地・都市・建設可能スポット） */}
+      {/* 頂点（定住地・都市・建設可能スポットはダブルクリックで建設） */}
       {gs.vertices.map(v => {
         const b = v.building;
-        const canSett = isMyTurn && (isSetupSett || (phase === "main" && gs.buildMode === "settlement" && gs.diceRolled))
+        const canSett = isMyTurn && (isSetupSett || canBuildSettNow)
           && canPlaceSett(v.id, gs.vertices) && (isSetupSett || isConnRoad(v.id, gs.edges, myIndex));
-        const canCity = isMyTurn && phase === "main" && gs.buildMode === "city" && b?.player === myIndex && b?.type === "settlement";
+        const canCity = canBuildCityNow && b?.player === myIndex && b?.type === "settlement";
         return (
-          <g key={v.id} onClick={() => onVertex(v.id)}
+          <g key={v.id} onDoubleClick={() => onVertex(v.id)}
             onMouseEnter={() => setHovV(v.id)} onMouseLeave={() => setHovV(null)}
             style={{ cursor: (canSett || canCity) ? "pointer" : "default" }}>
             {(canSett || canCity) && hovV === v.id && <circle cx={v.x} cy={v.y} r={11} fill="#ffffff2a" />}

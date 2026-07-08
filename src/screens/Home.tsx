@@ -29,7 +29,7 @@ export default function HomeScreen({ loading, error, onCreate, onJoin, onQuickMa
             ランダム対戦に出航
           </button>
           <div style={{ fontSize: "11px", color: C.inkDim, textAlign: "center", marginBottom: "18px" }}>
-            待っている誰かとすぐマッチング（2人戦）。相手がいなければ募集を始めます
+            待っている誰かとすぐマッチング（3人戦）。相手がいなければ募集を始めます
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>

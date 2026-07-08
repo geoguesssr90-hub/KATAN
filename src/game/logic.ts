@@ -172,7 +172,7 @@ export function createInitialState(code, hostName) {
     players: [initPlayer(0, hostName)],
     hexes: board.hexes, vertices: board.vertices, edges: board.edges, ports: board.ports,
     curPlayer: 0, setupStep: 0, setupSub: "settlement", setupOrder: [],
-    dice: null, diceRolled: false, robberMode: false, buildMode: null, lastVid: null,
+    dice: null, diceRolled: false, robberMode: false, lastVid: null,
     log: [`${hostName}がゲームを作成しました`], winner: null, updatedAt: Date.now(),
     pendingTrade: null,
     devDeck: createDevDeck(),

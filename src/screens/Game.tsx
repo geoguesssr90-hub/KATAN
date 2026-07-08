@@ -51,11 +51,10 @@ export default function GameScreen({ gs, myIndex, diceDisplay, diceRolling, sfxO
     gs.pendingAction?.type === 'yearOfPlenty' ? (isMyTurn ? "年の実り: 資源を2つ選んでください" : `${P.name}が資源を選んでいます...`) :
     gs.pendingAction?.type === 'monopoly' ? (isMyTurn ? "独占: 資源を選んでください" : `${P.name}が独占する資源を選んでいます...`) :
     pt ? (pt.from === myIndex ? "交易の返事を待っています..." : "交易の申し出が届いています") :
-    phase === "setup" ? (isMyTurn ? `セットアップ: ${gs.setupSub === "settlement" ? "定住地を置いてください" : "道を置いてください"}` : `${P.name}がセットアップ中...`) :
+    phase === "setup" ? (isMyTurn ? `セットアップ: ${gs.setupSub === "settlement" ? "定住地を置ける場所をダブルクリック" : "道を置ける場所をダブルクリック"}` : `${P.name}がセットアップ中...`) :
     !isMyTurn ? `${P.name}の手番を待っています` :
     !gs.diceRolled ? "サイコロを振ってください（騎士カードは振る前でも使用可）" :
-    gs.buildMode ? `盤面で${gs.buildMode === "road" ? "道" : gs.buildMode === "settlement" ? "定住地" : "都市"}の場所をクリック` :
-    "アクションを選んでください";
+    "盤面の光る場所をダブルクリックすると定住地・道・都市を建設できます";
 
   const endTurnDisabled = !gs.diceRolled || gs.robberMode || !!gs.pendingAction || !!gs.pendingRobberSteal || (gs.discardQueue?.length || 0) > 0;
 
@@ -182,18 +181,6 @@ export default function GameScreen({ gs, myIndex, diceDisplay, diceRolling, sfxO
                 <button className="btn" onClick={actions.rollDice} disabled={gs.diceRolled || diceRolling} style={btnStyle(gs.diceRolled || diceRolling, false)}>
                   サイコロを振る
                 </button>
-                <button className="btn" onClick={() => actions.buildMode("road")} disabled={!gs.diceRolled || !myP || !canAfford(myP, COSTS.road) || !!gs.pendingAction}
-                  style={btnStyle(!gs.diceRolled || !myP || !canAfford(myP, COSTS.road) || !!gs.pendingAction, gs.buildMode === "road")}>
-                  道を建設 <span style={{ float: "right", fontSize: "10px", opacity: 0.8 }}>🪵🧱</span>
-                </button>
-                <button className="btn" onClick={() => actions.buildMode("settlement")} disabled={!gs.diceRolled || !myP || !canAfford(myP, COSTS.settlement) || !!gs.pendingAction}
-                  style={btnStyle(!gs.diceRolled || !myP || !canAfford(myP, COSTS.settlement) || !!gs.pendingAction, gs.buildMode === "settlement")}>
-                  定住地を建設 <span style={{ float: "right", fontSize: "10px", opacity: 0.8 }}>🪵🧱🐑🌾</span>
-                </button>
-                <button className="btn" onClick={() => actions.buildMode("city")} disabled={!gs.diceRolled || !myP || !canAfford(myP, COSTS.city) || !!gs.pendingAction}
-                  style={btnStyle(!gs.diceRolled || !myP || !canAfford(myP, COSTS.city) || !!gs.pendingAction, gs.buildMode === "city")}>
-                  都市に昇格 <span style={{ float: "right", fontSize: "10px", opacity: 0.8 }}>🌾🌾⛏️⛏️⛏️</span>
-                </button>
                 <button className="btn" onClick={actions.buyDevCard} disabled={!gs.diceRolled || !myP || !canAfford(myP, COSTS.devCard) || !gs.devDeck?.length}
                   style={btnStyle(!gs.diceRolled || !myP || !canAfford(myP, COSTS.devCard) || !gs.devDeck?.length, false)}>
                   発展カード購入（残{gs.devDeck?.length || 0}） <span style={{ float: "right", fontSize: "10px", opacity: 0.8 }}>⛏️🌾🐑</span>
@@ -205,6 +192,33 @@ export default function GameScreen({ gs, myIndex, diceDisplay, diceRolling, sfxO
                   style={{ ...btnStyle(endTurnDisabled, false), marginTop: "4px", background: endTurnDisabled ? "#d9c9a4" : "linear-gradient(#a83a28, #7e2417)", border: `1px solid ${endTurnDisabled ? "#c0ab7e" : "#5c180e"}`, fontFamily: FONT_HEAD, letterSpacing: "2px" }}>
                   手番を終える
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* 建設コスト早見表（ボタンではなく盤面のダブルクリックで建設） */}
+          {phase === "main" && isMyTurn && (
+            <div style={{ ...panelStyle, padding: "8px 11px" }}>
+              <div style={{ ...sectionHead, marginBottom: "5px" }}>建設（盤面の光る場所をダブルクリック）</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                {[
+                  ["🛤️ 道", "🪵🧱", COSTS.road],
+                  ["🏠 定住地", "🪵🧱🐑🌾", COSTS.settlement],
+                  ["🏰 都市に昇格", "🌾🌾⛏️⛏️⛏️", COSTS.city],
+                ].map(([label, icons, cost]) => {
+                  const ok = !!(gs.diceRolled && myP && !gs.pendingAction && canAfford(myP, cost));
+                  return (
+                    <div key={label} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      fontSize: "11.5px", padding: "5px 9px", borderRadius: "4px", fontWeight: 700,
+                      background: ok ? "#faf2dc" : "#e6d6ae", border: `1px solid ${ok ? C.line : C.lineSoft}`,
+                      color: ok ? C.ink : C.inkDim, opacity: ok ? 1 : 0.65,
+                    }}>
+                      <span>{label}</span>
+                      <span style={{ fontSize: "12px" }}>{icons}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

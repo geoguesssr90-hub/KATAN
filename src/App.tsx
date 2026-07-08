@@ -160,7 +160,7 @@ export default function CatanOnline() {
 
     // 誰も待っていない → 自分がゲームを作って募集を出す
     const code = genCode();
-    const state = { ...createInitialState(code, name), quick: true, numPlayersTarget: 2 };
+    const state = { ...createInitialState(code, name), quick: true, numPlayersTarget: 3 };
     await saveGame(state);
     try { await set(ref(db, QUICK_REF), { code, at: Date.now() }); } catch { /* noop */ }
     saveMyInfo({ code, index: 0 });
@@ -225,25 +225,31 @@ export default function CatanOnline() {
         }
         return addLog({ ...s, vertices: nv, players: np, setupSub: "road", lastVid: vid }, `${P.name}が定住地を配置${extra}。次に道を置いてください`);
       }
-      if (phase === "main" && s.diceRolled && s.buildMode === "settlement") {
-        if (!canPlaceSett(vid, vertices) || !isConnRoad(vid, edges, curPlayer) || !canAfford(P, COSTS.settlement)) return null;
-        const nv = vertices.map(v => v.id === vid ? { ...v, building: { player: curPlayer, type: "settlement" } } : v);
-        const np = players.map((p, i) => i !== curPlayer ? p : { ...p, vp: p.vp + 1, settlementsLeft: p.settlementsLeft - 1, res: Object.fromEntries(Object.entries(p.res).map(([r, n]) => [r, n - (COSTS.settlement[r] || 0)])) });
-        let ns = addLog({ ...s, vertices: nv, players: np, buildMode: null }, `${P.name}が定住地を建設！`);
-        ns = updateLongestRoad(ns); // 相手の道が分断される可能性がある
-        const totalVP = calcTotalVP(np[curPlayer], ns);
-        if (totalVP >= 10) ns = { ...ns, winner: curPlayer, phase: "ended" };
-        return ns;
-      }
-      if (phase === "main" && s.diceRolled && s.buildMode === "city") {
+      // メイン фェーズ：ボタンでモードを選ばず、置ける場所をダブルクリックしたら直接建設する
+      const isFreeToAct = phase === "main" && s.diceRolled && !s.pendingAction && !s.robberMode && !s.pendingRobberSteal && !(s.discardQueue?.length);
+      if (isFreeToAct) {
         const v = vertices.find(v => v.id === vid);
-        if (!v?.building || v.building.player !== curPlayer || v.building.type !== "settlement" || !canAfford(P, COSTS.city)) return null;
-        const nv = vertices.map(v => v.id === vid ? { ...v, building: { player: curPlayer, type: "city" } } : v);
-        const np = players.map((p, i) => i !== curPlayer ? p : { ...p, vp: p.vp + 1, citiesLeft: p.citiesLeft - 1, settlementsLeft: p.settlementsLeft + 1, res: Object.fromEntries(Object.entries(p.res).map(([r, n]) => [r, n - (COSTS.city[r] || 0)])) });
-        let ns = addLog({ ...s, vertices: nv, players: np, buildMode: null }, `${P.name}が都市を建設！`);
-        const totalVP = calcTotalVP(np[curPlayer], ns);
-        if (totalVP >= 10) ns = { ...ns, winner: curPlayer, phase: "ended" };
-        return ns;
+        if (!v?.building) {
+          // 空き頂点 → 定住地を新設
+          if (!canPlaceSett(vid, vertices) || !isConnRoad(vid, edges, curPlayer) || !canAfford(P, COSTS.settlement)) return null;
+          const nv = vertices.map(v => v.id === vid ? { ...v, building: { player: curPlayer, type: "settlement" } } : v);
+          const np = players.map((p, i) => i !== curPlayer ? p : { ...p, vp: p.vp + 1, settlementsLeft: p.settlementsLeft - 1, res: Object.fromEntries(Object.entries(p.res).map(([r, n]) => [r, n - (COSTS.settlement[r] || 0)])) });
+          let ns = addLog({ ...s, vertices: nv, players: np }, `${P.name}が定住地を建設！`);
+          ns = updateLongestRoad(ns); // 相手の道が分断される可能性がある
+          const totalVP = calcTotalVP(np[curPlayer], ns);
+          if (totalVP >= 10) ns = { ...ns, winner: curPlayer, phase: "ended" };
+          return ns;
+        }
+        if (v.building.player === curPlayer && v.building.type === "settlement") {
+          // 自分の定住地 → 都市に昇格
+          if (!canAfford(P, COSTS.city)) return null;
+          const nv = vertices.map(v => v.id === vid ? { ...v, building: { player: curPlayer, type: "city" } } : v);
+          const np = players.map((p, i) => i !== curPlayer ? p : { ...p, vp: p.vp + 1, citiesLeft: p.citiesLeft - 1, settlementsLeft: p.settlementsLeft + 1, res: Object.fromEntries(Object.entries(p.res).map(([r, n]) => [r, n - (COSTS.city[r] || 0)])) });
+          let ns = addLog({ ...s, vertices: nv, players: np }, `${P.name}が都市を建設！`);
+          const totalVP = calcTotalVP(np[curPlayer], ns);
+          if (totalVP >= 10) ns = { ...ns, winner: curPlayer, phase: "ended" };
+          return ns;
+        }
       }
       return null;
     });
@@ -264,7 +270,7 @@ export default function CatanOnline() {
         const ne = edges.map(e => e.id === eid ? { ...e, road: curPlayer } : e);
         const np = players.map((p, i) => i !== curPlayer ? p : { ...p, roadsLeft: p.roadsLeft - 1 });
         const next = setupStep + 1; const done = next >= setupOrder.length;
-        let ns = { ...s, edges: ne, players: np, setupStep: next, setupSub: "settlement", buildMode: null, lastVid: null };
+        let ns = { ...s, edges: ne, players: np, setupStep: next, setupSub: "settlement", lastVid: null };
         if (done) { ns = addLog({ ...ns, phase: "main", curPlayer: 0, diceRolled: false, dice: null }, "セットアップ完了！" + players[0].name + "のターン"); }
         else { const ncp = setupOrder[next]; ns = addLog({ ...ns, curPlayer: ncp }, `${players[ncp].name}が定住地を置いてください`); }
         return updateLongestRoad(ns);
@@ -284,12 +290,14 @@ export default function CatanOnline() {
         return addLog(ns, `${P.name}が道を建設！（道路建設カード、残り${roadsLeft}本）`);
       }
 
-      if (phase === "main" && s.buildMode === "road" && s.diceRolled && canAfford(P, COSTS.road)) {
+      // メインフェーズ：ボタンでモードを選ばず、置ける辺をダブルクリックしたら直接建設する
+      const isFreeToAct = phase === "main" && s.diceRolled && !s.pendingAction && !s.robberMode && !s.pendingRobberSteal && !(s.discardQueue?.length);
+      if (isFreeToAct && canAfford(P, COSTS.road)) {
         const connected = v1b?.building?.player === curPlayer || v2b?.building?.player === curPlayer || isConnRoad(edge.v1, edges, curPlayer) || isConnRoad(edge.v2, edges, curPlayer);
         if (!connected) return null;
         const ne = edges.map(e => e.id === eid ? { ...e, road: curPlayer } : e);
         const np = players.map((p, i) => i !== curPlayer ? p : { ...p, roadsLeft: p.roadsLeft - 1, res: Object.fromEntries(Object.entries(p.res).map(([r, n]) => [r, n - (COSTS.road[r] || 0)])) });
-        const ns = addLog({ ...s, edges: ne, players: np, buildMode: null }, `${P.name}が道を建設！`);
+        const ns = addLog({ ...s, edges: ne, players: np }, `${P.name}が道を建設！`);
         return updateLongestRoad(ns);
       }
       return null;
@@ -492,11 +500,6 @@ export default function CatanOnline() {
     });
   }
 
-  async function handleBuildMode(mode) {
-    if (!gs || gs.curPlayer !== myIndex) return;
-    await doAction(s => ({ ...s, buildMode: s.buildMode === mode ? null : mode }));
-  }
-
   async function handleEndTurn() {
     if (!gs || gs.curPlayer !== myIndex || !gs.diceRolled || gs.robberMode || gs.pendingAction || gs.pendingRobberSteal || (gs.discardQueue?.length || 0) > 0) return;
     await doAction(s => {
@@ -508,7 +511,7 @@ export default function CatanOnline() {
         devCards: [...(p.devCards || []), ...(p.newDevCards || [])],
         newDevCards: [],
       });
-      return addLog({ ...s, curPlayer: next, diceRolled: false, dice: null, buildMode: null, pendingTrade: null, playedDevCardThisTurn: false, players: np },
+      return addLog({ ...s, curPlayer: next, diceRolled: false, dice: null, pendingTrade: null, playedDevCardThisTurn: false, players: np },
         `${s.players[next].name}のターン`);
     });
   }
@@ -600,6 +603,7 @@ export default function CatanOnline() {
 
   async function handleCancelTrade() {
     await doAction(s => {
+   
       if (!s.pendingTrade || s.pendingTrade.from !== myIndex) return null;
       return addLog({ ...s, pendingTrade: null }, `${s.players[s.pendingTrade.from].name}が交易提案を取り下げました`);
     });
@@ -622,7 +626,6 @@ export default function CatanOnline() {
         sfxOn={sfxOn} bgmOn={bgmOn} onToggleSfx={handleToggleSfx} onToggleBgm={handleToggleBgm}
         actions={{
           rollDice: handleRollDice,
-          buildMode: handleBuildMode,
           buyDevCard: handleBuyDevCard,
           playDevCard: handlePlayDevCard,
           endTurn: handleEndTurn,

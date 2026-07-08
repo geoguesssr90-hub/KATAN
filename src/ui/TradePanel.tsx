@@ -32,17 +32,25 @@ export default function TradePanel({ gs, myIndex, myP, portRates, counterOf, onC
     opacity: active ? 1 : 0.75,
   });
 
-  const stepperRow = (r, val, setter, maxed) => (
-    <div key={r} style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "5px" }}>
-      <span style={{ width: "18px" }}>{RI[r]}</span>
-      <span style={{ fontSize: "11.5px", color: C.inkSub, flex: 1 }}>{RN[r]}</span>
-      <span style={{ fontSize: "10.5px", color: C.inkDim, width: "38px", textAlign: "right" }}>{setter === setGive ? `持:${myP?.res[r] || 0}` : ""}</span>
-      {mode === "bank" && <span style={{ fontSize: "10.5px", color: portRates[r] < 4 ? C.red : C.inkDim, width: "28px", textAlign: "center", fontWeight: 700 }}>{setter === setGive ? `${portRates[r]}:1` : ""}</span>}
-      <button className="btn" style={stepBtn} onClick={() => setter(o => ({ ...o, [r]: Math.max(0, o[r] - 1) }))}>−</button>
-      <span style={{ width: "22px", textAlign: "center", fontSize: "13px", fontWeight: 800, color: val > 0 ? C.red : C.inkDim }}>{val}</span>
-      <button className="btn" style={stepBtn} onClick={() => setter(o => ({ ...o, [r]: maxed !== undefined ? Math.min(maxed, o[r] + 1) : o[r] + 1 }))}>+</button>
-    </div>
-  );
+  // 銀行交易で「渡す」側は、レート分（例:4:1なら4個）を1クリックでまとめて増減
+  const stepperRow = (r, val, setter, maxed) => {
+    const step = mode === "bank" && setter === setGive ? portRates[r] : 1;
+    return (
+      <div key={r} style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "5px" }}>
+        <span style={{ width: "18px" }}>{RI[r]}</span>
+        <span style={{ fontSize: "11.5px", color: C.inkSub, flex: 1 }}>{RN[r]}</span>
+        <span style={{ fontSize: "10.5px", color: C.inkDim, width: "38px", textAlign: "right" }}>{setter === setGive ? `持:${myP?.res[r] || 0}` : ""}</span>
+        {mode === "bank" && <span style={{ fontSize: "10.5px", color: portRates[r] < 4 ? C.red : C.inkDim, width: "28px", textAlign: "center", fontWeight: 700 }}>{setter === setGive ? `${portRates[r]}:1` : ""}</span>}
+        <button className="btn" style={stepBtn} onClick={() => setter(o => ({ ...o, [r]: Math.max(0, o[r] - step) }))}>−</button>
+        <span style={{ width: "22px", textAlign: "center", fontSize: "13px", fontWeight: 800, color: val > 0 ? C.red : C.inkDim }}>{val}</span>
+        <button className="btn" style={stepBtn} onClick={() => setter(o => {
+          const next = o[r] + step;
+          if (maxed !== undefined && next > maxed) return o;
+          return { ...o, [r]: next };
+        })}>+</button>
+      </div>
+    );
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#160d08bb", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, backdropFilter: "blur(2px)" }} onClick={onClose}>
